@@ -58,6 +58,7 @@ string rover_data[6][4];
 float glob_average = 0.0;
 float local_average = 0.0;
 float local_average_position;
+float combined_theta = 0.0;
 
 
 // state machine states
@@ -202,7 +203,8 @@ void mobilityStateMachine(const ros::TimerEvent &)
             state_machine_msg.data = "TRANSLATING";//, " + converter.str();
             //float angular_velocity = k * (local_average - current_location.theta);
             //float angular_velocity = k * (glob_average - current_location.theta);
-            float angular_velocity = k * (local_average_position - current_location.theta);
+            //float angular_velocity = k * (local_average_position - current_location.theta);
+            float angular_velocity = k * (combined_theta - current_location.theta);
             float linear_velocity = 0.05;
             setVelocity(linear_velocity, angular_velocity);
 
@@ -392,6 +394,13 @@ void poseHandler(const std_msgs::String::ConstPtr& message)
     // calculate global average heading
     float u1[2], u2[2], u3[2], u4[2], u5[2], u6[2];
     float g_avg[2];
+
+    float seperation[2];
+    float sep_distance = 1.0;
+    float sep_weight = 0.5;
+    float coh_weight = 0.0;
+    float align_weight = 0.0;
+
     if (n_o_r == 3)
     {
 
@@ -625,6 +634,9 @@ void poseHandler(const std_msgs::String::ConstPtr& message)
         loc_positions[0] = 0.0;
         loc_positions[1] = 0.0;
 
+        seperation[0] = 0.0;
+        seperation[1] = 0.0;
+
         if (index == 0)
         {
             g_avg[0] = u1[1];
@@ -643,6 +655,12 @@ void poseHandler(const std_msgs::String::ConstPtr& message)
                 loc_positions[0] = loc_positions[0] + xdif;
                 loc_positions[1] = loc_positions[1] + ydif;
                 num_neighbors++;
+
+                if (d12 <= sep_distance)
+                {
+                    seperation[0] += xdif;
+                    seperation[1] += ydif;
+                }
             }
 
             xdif = strtof((rover_data[0][1]).c_str(),0) - strtof((rover_data[2][1]).c_str(),0);
@@ -658,6 +676,12 @@ void poseHandler(const std_msgs::String::ConstPtr& message)
                 loc_positions[0] = loc_positions[0] + xdif;
                 loc_positions[1] = loc_positions[1] + ydif;
                 num_neighbors++;
+
+                if (d13 <= sep_distance)
+                {
+                    seperation[0] += xdif;
+                    seperation[1] += ydif;
+                }
             }
 
             xdif = strtof((rover_data[0][1]).c_str(),0) - strtof((rover_data[3][1]).c_str(),0);
@@ -673,6 +697,12 @@ void poseHandler(const std_msgs::String::ConstPtr& message)
                 loc_positions[0] = loc_positions[0] + xdif;
                 loc_positions[1] = loc_positions[1] + ydif;
                 num_neighbors++;
+
+                if (d14 <= sep_distance)
+                {
+                    seperation[0] += xdif;
+                    seperation[1] += ydif;
+                }
             }
 
             xdif = strtof((rover_data[0][1]).c_str(),0) - strtof((rover_data[4][1]).c_str(),0);
@@ -688,6 +718,12 @@ void poseHandler(const std_msgs::String::ConstPtr& message)
                 loc_positions[0] = loc_positions[0] + xdif;
                 loc_positions[1] = loc_positions[1] + ydif;
                 num_neighbors++;
+
+                if (d15 <= sep_distance)
+                {
+                    seperation[0] += xdif;
+                    seperation[1] += ydif;
+                }
             }
 
             xdif = strtof((rover_data[0][1]).c_str(),0) - strtof((rover_data[5][1]).c_str(),0);
@@ -703,6 +739,12 @@ void poseHandler(const std_msgs::String::ConstPtr& message)
                 loc_positions[0] = loc_positions[0] + xdif;
                 loc_positions[1] = loc_positions[1] + ydif;
                 num_neighbors++;
+
+                if (d16 <= sep_distance)
+                {
+                    seperation[0] += xdif;
+                    seperation[1] += ydif;
+                }
             }
 
             if (num_neighbors == 1)
@@ -716,13 +758,25 @@ void poseHandler(const std_msgs::String::ConstPtr& message)
                 local_average = atan2(g_avg[1], g_avg[0]);
             }
 
+            // normalize and then multiply by weights
+            // alignment
+            float norm = sqrt(g_avg[0]*g_avg[0] + g_avg[1]*g_avg[1]);
+            g_avg[0] = g_avg[0]/norm * align_weight;
+            g_avg[1] = g_avg[1]/norm * align_weight;
+            // cohesion
+            norm = sqrt(loc_positions[0]*loc_positions[0] + loc_positions[1]*loc_positions[1]);
+            loc_positions[0] = -loc_positions[0]/norm * coh_weight;
+            loc_positions[1] = -loc_positions[1]/norm * coh_weight;
+            // separation
+            norm = sqrt(seperation[0]*seperation[0] + seperation[1]*seperation[1]);
+            seperation[0] = -seperation[0]/norm * sep_weight;
+            seperation[1] = -seperation[1]/norm * sep_weight;
 
-            loc_positions[0] = -loc_positions[0] / (num_neighbors-1);
-            loc_positions[1] = -loc_positions[1] / (num_neighbors-1);
+            combined_theta = atan2(g_avg[1]+loc_positions[1]+seperation[1], g_avg[0]+loc_positions[0]+seperation[0]);
 
             local_average_position = atan2(loc_positions[1], loc_positions[0]);
 
-            gat << rover_name << " with " << num_neighbors << " neighbors with Local Average Theta = " << local_average;
+            gat << rover_name << " with " << num_neighbors << " neighbors with Combine Theta = " << combined_theta;
             pose_msg.data = gat.str();
             local_average_heading.publish(pose_msg);
 
@@ -744,6 +798,12 @@ void poseHandler(const std_msgs::String::ConstPtr& message)
                 loc_positions[0] = loc_positions[0] + xdif;
                 loc_positions[1] = loc_positions[1] + ydif;
                 num_neighbors++;
+
+                if (d12 <= sep_distance)
+                {
+                    seperation[0] += xdif;
+                    seperation[1] += ydif;
+                }
             }
 
             xdif = strtof((rover_data[1][1]).c_str(),0) - strtof((rover_data[2][1]).c_str(),0);
@@ -759,6 +819,12 @@ void poseHandler(const std_msgs::String::ConstPtr& message)
                 loc_positions[0] = loc_positions[0] + xdif;
                 loc_positions[1] = loc_positions[1] + ydif;
                 num_neighbors++;
+
+                if (d13 <= sep_distance)
+                {
+                    seperation[0] += xdif;
+                    seperation[1] += ydif;
+                }
             }
 
             xdif = strtof((rover_data[1][1]).c_str(),0) - strtof((rover_data[3][1]).c_str(),0);
@@ -774,6 +840,12 @@ void poseHandler(const std_msgs::String::ConstPtr& message)
                 loc_positions[0] = loc_positions[0] + xdif;
                 loc_positions[1] = loc_positions[1] + ydif;
                 num_neighbors++;
+
+                if (d14 <= sep_distance)
+                {
+                    seperation[0] += xdif;
+                    seperation[1] += ydif;
+                }
             }
 
             xdif = strtof((rover_data[1][1]).c_str(),0) - strtof((rover_data[4][1]).c_str(),0);
@@ -789,6 +861,12 @@ void poseHandler(const std_msgs::String::ConstPtr& message)
                 loc_positions[0] = loc_positions[0] + xdif;
                 loc_positions[1] = loc_positions[1] + ydif;
                 num_neighbors++;
+
+                if (d15 <= sep_distance)
+                {
+                    seperation[0] += xdif;
+                    seperation[1] += ydif;
+                }
             }
 
             xdif = strtof((rover_data[1][1]).c_str(),0) - strtof((rover_data[5][1]).c_str(),0);
@@ -804,6 +882,12 @@ void poseHandler(const std_msgs::String::ConstPtr& message)
                 loc_positions[0] = loc_positions[0] + xdif;
                 loc_positions[1] = loc_positions[1] + ydif;
                 num_neighbors++;
+
+                if (d16 <= sep_distance)
+                {
+                    seperation[0] += xdif;
+                    seperation[1] += ydif;
+                }
             }
 
             if (num_neighbors == 1)
@@ -817,12 +901,25 @@ void poseHandler(const std_msgs::String::ConstPtr& message)
                 local_average = atan2(g_avg[1], g_avg[0]);
             }
 
-            loc_positions[0] = -loc_positions[0] / (num_neighbors-1);
-            loc_positions[1] = -loc_positions[1] / (num_neighbors-1);
+            // normalize and then multiply by weights
+            // alignment
+            float norm = sqrt(g_avg[0]*g_avg[0] + g_avg[1]*g_avg[1]);
+            g_avg[0] = g_avg[0]/norm * align_weight;
+            g_avg[1] = g_avg[1]/norm * align_weight;
+            // cohesion
+            norm = sqrt(loc_positions[0]*loc_positions[0] + loc_positions[1]*loc_positions[1]);
+            loc_positions[0] = -loc_positions[0]/norm * coh_weight;
+            loc_positions[1] = -loc_positions[1]/norm * coh_weight;
+            // separation
+            norm = sqrt(seperation[0]*seperation[0] + seperation[1]*seperation[1]);
+            seperation[0] = -seperation[0]/norm * sep_weight;
+            seperation[1] = -seperation[1]/norm * sep_weight;
+
+            combined_theta = atan2(g_avg[1]+loc_positions[1]+seperation[1], g_avg[0]+loc_positions[0]+seperation[0]);
 
             local_average_position = atan2(loc_positions[1], loc_positions[0]);
 
-            gat << rover_name << " with " << num_neighbors << " neighbors with Local Average Theta = " << local_average;
+            gat << rover_name << " with " << num_neighbors << " neighbors with Combine Theta = " << combined_theta;
             pose_msg.data = gat.str();
             local_average_heading.publish(pose_msg);
 
@@ -844,6 +941,12 @@ void poseHandler(const std_msgs::String::ConstPtr& message)
                 loc_positions[0] = loc_positions[0] + xdif;
                 loc_positions[1] = loc_positions[1] + ydif;
                 num_neighbors++;
+
+                if (d12 <= sep_distance)
+                {
+                    seperation[0] += xdif;
+                    seperation[1] += ydif;
+                }
             }
 
             xdif = strtof((rover_data[2][1]).c_str(),0) - strtof((rover_data[1][1]).c_str(),0);
@@ -859,6 +962,12 @@ void poseHandler(const std_msgs::String::ConstPtr& message)
                 loc_positions[0] = loc_positions[0] + xdif;
                 loc_positions[1] = loc_positions[1] + ydif;
                 num_neighbors++;
+
+                if (d13 <= sep_distance)
+                {
+                    seperation[0] += xdif;
+                    seperation[1] += ydif;
+                }
             }
 
             xdif = strtof((rover_data[2][1]).c_str(),0) - strtof((rover_data[3][1]).c_str(),0);
@@ -874,6 +983,12 @@ void poseHandler(const std_msgs::String::ConstPtr& message)
                 loc_positions[0] = loc_positions[0] + xdif;
                 loc_positions[1] = loc_positions[1] + ydif;
                 num_neighbors++;
+
+                if (d14 <= sep_distance)
+                {
+                    seperation[0] += xdif;
+                    seperation[1] += ydif;
+                }
             }
 
             xdif = strtof((rover_data[2][1]).c_str(),0) - strtof((rover_data[4][1]).c_str(),0);
@@ -889,6 +1004,12 @@ void poseHandler(const std_msgs::String::ConstPtr& message)
                 loc_positions[0] = loc_positions[0] + xdif;
                 loc_positions[1] = loc_positions[1] + ydif;
                 num_neighbors++;
+
+                if (d15 <= sep_distance)
+                {
+                    seperation[0] += xdif;
+                    seperation[1] += ydif;
+                }
             }
 
             xdif = strtof((rover_data[2][1]).c_str(),0) - strtof((rover_data[5][1]).c_str(),0);
@@ -904,6 +1025,12 @@ void poseHandler(const std_msgs::String::ConstPtr& message)
                 loc_positions[0] = loc_positions[0] + xdif;
                 loc_positions[1] = loc_positions[1] + ydif;
                 num_neighbors++;
+
+                if (d16 <= sep_distance)
+                {
+                    seperation[0] += xdif;
+                    seperation[1] += ydif;
+                }
             }
 
             if (num_neighbors == 1)
@@ -918,12 +1045,25 @@ void poseHandler(const std_msgs::String::ConstPtr& message)
             }
 
 
-            loc_positions[0] = -loc_positions[0] / (num_neighbors-1);
-            loc_positions[1] = -loc_positions[1] / (num_neighbors-1);
+            // normalize and then multiply by weights
+            // alignment
+            float norm = sqrt(g_avg[0]*g_avg[0] + g_avg[1]*g_avg[1]);
+            g_avg[0] = g_avg[0]/norm * align_weight;
+            g_avg[1] = g_avg[1]/norm * align_weight;
+            // cohesion
+            norm = sqrt(loc_positions[0]*loc_positions[0] + loc_positions[1]*loc_positions[1]);
+            loc_positions[0] = -loc_positions[0]/norm * coh_weight;
+            loc_positions[1] = -loc_positions[1]/norm * coh_weight;
+            // separation
+            norm = sqrt(seperation[0]*seperation[0] + seperation[1]*seperation[1]);
+            seperation[0] = -seperation[0]/norm * sep_weight;
+            seperation[1] = -seperation[1]/norm * sep_weight;
+
+            combined_theta = atan2(g_avg[1]+loc_positions[1]+seperation[1], g_avg[0]+loc_positions[0]+seperation[0]);
 
             local_average_position = atan2(loc_positions[1], loc_positions[0]);
 
-            gat << rover_name << " with " << num_neighbors << " neighbors with Local Average Theta = " << local_average;
+            gat << rover_name << " with " << num_neighbors << " neighbors with Combine Theta = " << combined_theta;
             pose_msg.data = gat.str();
             local_average_heading.publish(pose_msg);
         } else if(index == 3)
@@ -944,6 +1084,12 @@ void poseHandler(const std_msgs::String::ConstPtr& message)
                 loc_positions[0] = loc_positions[0] + xdif;
                 loc_positions[1] = loc_positions[1] + ydif;
                 num_neighbors++;
+
+                if (d12 <= sep_distance)
+                {
+                    seperation[0] += xdif;
+                    seperation[1] += ydif;
+                }
             }
 
             xdif = strtof((rover_data[3][1]).c_str(),0) - strtof((rover_data[1][1]).c_str(),0);
@@ -959,6 +1105,12 @@ void poseHandler(const std_msgs::String::ConstPtr& message)
                 loc_positions[0] = loc_positions[0] + xdif;
                 loc_positions[1] = loc_positions[1] + ydif;
                 num_neighbors++;
+
+                if (d13 <= sep_distance)
+                {
+                    seperation[0] += xdif;
+                    seperation[1] += ydif;
+                }
             }
 
             xdif = strtof((rover_data[3][1]).c_str(),0) - strtof((rover_data[2][1]).c_str(),0);
@@ -974,6 +1126,12 @@ void poseHandler(const std_msgs::String::ConstPtr& message)
                 loc_positions[0] = loc_positions[0] + xdif;
                 loc_positions[1] = loc_positions[1] + ydif;
                 num_neighbors++;
+
+                if (d14 <= sep_distance)
+                {
+                    seperation[0] += xdif;
+                    seperation[1] += ydif;
+                }
             }
 
             xdif = strtof((rover_data[3][1]).c_str(),0) - strtof((rover_data[4][1]).c_str(),0);
@@ -989,6 +1147,12 @@ void poseHandler(const std_msgs::String::ConstPtr& message)
                 loc_positions[0] = loc_positions[0] + xdif;
                 loc_positions[1] = loc_positions[1] + ydif;
                 num_neighbors++;
+
+                if (d15 <= sep_distance)
+                {
+                    seperation[0] += xdif;
+                    seperation[1] += ydif;
+                }
             }
 
             xdif = strtof((rover_data[3][1]).c_str(),0) - strtof((rover_data[5][1]).c_str(),0);
@@ -1004,6 +1168,12 @@ void poseHandler(const std_msgs::String::ConstPtr& message)
                 loc_positions[0] = loc_positions[0] + xdif;
                 loc_positions[1] = loc_positions[1] + ydif;
                 num_neighbors++;
+
+                if (d16 <= sep_distance)
+                {
+                    seperation[0] += xdif;
+                    seperation[1] += ydif;
+                }
             }
 
             if (num_neighbors == 1)
@@ -1018,12 +1188,25 @@ void poseHandler(const std_msgs::String::ConstPtr& message)
             }
 
 
-            loc_positions[0] = -loc_positions[0] / (num_neighbors-1);
-            loc_positions[1] = -loc_positions[1] / (num_neighbors-1);
+            // normalize and then multiply by weights
+            // alignment
+            float norm = sqrt(g_avg[0]*g_avg[0] + g_avg[1]*g_avg[1]);
+            g_avg[0] = g_avg[0]/norm * align_weight;
+            g_avg[1] = g_avg[1]/norm * align_weight;
+            // cohesion
+            norm = sqrt(loc_positions[0]*loc_positions[0] + loc_positions[1]*loc_positions[1]);
+            loc_positions[0] = -loc_positions[0]/norm * coh_weight;
+            loc_positions[1] = -loc_positions[1]/norm * coh_weight;
+            // separation
+            norm = sqrt(seperation[0]*seperation[0] + seperation[1]*seperation[1]);
+            seperation[0] = -seperation[0]/norm * sep_weight;
+            seperation[1] = -seperation[1]/norm * sep_weight;
+
+            combined_theta = atan2(g_avg[1]+loc_positions[1]+seperation[1], g_avg[0]+loc_positions[0]+seperation[0]);
 
             local_average_position = atan2(loc_positions[1], loc_positions[0]);
 
-            gat << rover_name << " with " << num_neighbors << " neighbors with Local Average Theta = " << local_average;
+            gat << rover_name << " with " << num_neighbors << " neighbors with Combine Theta = " << combined_theta;
             pose_msg.data = gat.str();
             local_average_heading.publish(pose_msg);
         } else if(index == 4)
@@ -1044,6 +1227,12 @@ void poseHandler(const std_msgs::String::ConstPtr& message)
                 loc_positions[0] = loc_positions[0] + xdif;
                 loc_positions[1] = loc_positions[1] + ydif;
                 num_neighbors++;
+
+                if (d12 <= sep_distance)
+                {
+                    seperation[0] += xdif;
+                    seperation[1] += ydif;
+                }
             }
 
             xdif = strtof((rover_data[4][1]).c_str(),0) - strtof((rover_data[1][1]).c_str(),0);
@@ -1059,6 +1248,12 @@ void poseHandler(const std_msgs::String::ConstPtr& message)
                 loc_positions[0] = loc_positions[0] + xdif;
                 loc_positions[1] = loc_positions[1] + ydif;
                 num_neighbors++;
+
+                if (d13 <= sep_distance)
+                {
+                    seperation[0] += xdif;
+                    seperation[1] += ydif;
+                }
             }
 
             xdif = strtof((rover_data[4][1]).c_str(),0) - strtof((rover_data[2][1]).c_str(),0);
@@ -1074,6 +1269,12 @@ void poseHandler(const std_msgs::String::ConstPtr& message)
                 loc_positions[0] = loc_positions[0] + xdif;
                 loc_positions[1] = loc_positions[1] + ydif;
                 num_neighbors++;
+
+                if (d14 <= sep_distance)
+                {
+                    seperation[0] += xdif;
+                    seperation[1] += ydif;
+                }
             }
 
             xdif = strtof((rover_data[4][1]).c_str(),0) - strtof((rover_data[3][1]).c_str(),0);
@@ -1089,6 +1290,12 @@ void poseHandler(const std_msgs::String::ConstPtr& message)
                 loc_positions[0] = loc_positions[0] + xdif;
                 loc_positions[1] = loc_positions[1] + ydif;
                 num_neighbors++;
+
+                if (d15 <= sep_distance)
+                {
+                    seperation[0] += xdif;
+                    seperation[1] += ydif;
+                }
             }
 
             xdif = strtof((rover_data[4][1]).c_str(),0) - strtof((rover_data[5][1]).c_str(),0);
@@ -1104,6 +1311,12 @@ void poseHandler(const std_msgs::String::ConstPtr& message)
                 loc_positions[0] = loc_positions[0] + xdif;
                 loc_positions[1] = loc_positions[1] + ydif;
                 num_neighbors++;
+
+                if (d16 <= sep_distance)
+                {
+                    seperation[0] += xdif;
+                    seperation[1] += ydif;
+                }
             }
 
             if (num_neighbors == 1)
@@ -1118,12 +1331,25 @@ void poseHandler(const std_msgs::String::ConstPtr& message)
             }
 
 
-            loc_positions[0] = -loc_positions[0] / (num_neighbors-1);
-            loc_positions[1] = -loc_positions[1] / (num_neighbors-1);
+            // normalize and then multiply by weights
+            // alignment
+            float norm = sqrt(g_avg[0]*g_avg[0] + g_avg[1]*g_avg[1]);
+            g_avg[0] = g_avg[0]/norm * align_weight;
+            g_avg[1] = g_avg[1]/norm * align_weight;
+            // cohesion
+            norm = sqrt(loc_positions[0]*loc_positions[0] + loc_positions[1]*loc_positions[1]);
+            loc_positions[0] = -loc_positions[0]/norm * coh_weight;
+            loc_positions[1] = -loc_positions[1]/norm * coh_weight;
+            // separation
+            norm = sqrt(seperation[0]*seperation[0] + seperation[1]*seperation[1]);
+            seperation[0] = -seperation[0]/norm * sep_weight;
+            seperation[1] = -seperation[1]/norm * sep_weight;
+
+            combined_theta = atan2(g_avg[1]+loc_positions[1]+seperation[1], g_avg[0]+loc_positions[0]+seperation[0]);
 
             local_average_position = atan2(loc_positions[1], loc_positions[0]);
 
-            gat << rover_name << " with " << num_neighbors << " neighbors with Local Average Theta = " << local_average;
+            gat << rover_name << " with " << num_neighbors << " neighbors with Combine Theta = " << combined_theta;
             pose_msg.data = gat.str();
             local_average_heading.publish(pose_msg);
         } else if(index == 5)
@@ -1144,6 +1370,12 @@ void poseHandler(const std_msgs::String::ConstPtr& message)
                 loc_positions[0] = loc_positions[0] + xdif;
                 loc_positions[1] = loc_positions[1] + ydif;
                 num_neighbors++;
+
+                if (d12 <= sep_distance)
+                {
+                    seperation[0] += xdif;
+                    seperation[1] += ydif;
+                }
             }
 
             xdif = strtof((rover_data[5][1]).c_str(),0) - strtof((rover_data[1][1]).c_str(),0);
@@ -1159,6 +1391,12 @@ void poseHandler(const std_msgs::String::ConstPtr& message)
                 loc_positions[0] = loc_positions[0] + xdif;
                 loc_positions[1] = loc_positions[1] + ydif;
                 num_neighbors++;
+
+                if (d13 <= sep_distance)
+                {
+                    seperation[0] += xdif;
+                    seperation[1] += ydif;
+                }
             }
 
             xdif = strtof((rover_data[5][1]).c_str(),0) - strtof((rover_data[2][1]).c_str(),0);
@@ -1174,6 +1412,12 @@ void poseHandler(const std_msgs::String::ConstPtr& message)
                 loc_positions[0] = loc_positions[0] + xdif;
                 loc_positions[1] = loc_positions[1] + ydif;
                 num_neighbors++;
+
+                if (d14 <= sep_distance)
+                {
+                    seperation[0] += xdif;
+                    seperation[1] += ydif;
+                }
             }
 
             xdif = strtof((rover_data[5][1]).c_str(),0) - strtof((rover_data[3][1]).c_str(),0);
@@ -1189,6 +1433,12 @@ void poseHandler(const std_msgs::String::ConstPtr& message)
                 loc_positions[0] = loc_positions[0] + xdif;
                 loc_positions[1] = loc_positions[1] + ydif;
                 num_neighbors++;
+
+                if (d15 <= sep_distance)
+                {
+                    seperation[0] += xdif;
+                    seperation[1] += ydif;
+                }
             }
 
             xdif = strtof((rover_data[5][1]).c_str(),0) - strtof((rover_data[4][1]).c_str(),0);
@@ -1204,6 +1454,12 @@ void poseHandler(const std_msgs::String::ConstPtr& message)
                 loc_positions[0] = loc_positions[0] + xdif;
                 loc_positions[1] = loc_positions[1] + ydif;
                 num_neighbors++;
+
+                if (d16 <= sep_distance)
+                {
+                    seperation[0] += xdif;
+                    seperation[1] += ydif;
+                }
             }
 
             if (num_neighbors == 1)
@@ -1218,15 +1474,30 @@ void poseHandler(const std_msgs::String::ConstPtr& message)
             }
 
 
-            loc_positions[0] = -loc_positions[0] / (num_neighbors-1);
-            loc_positions[1] = -loc_positions[1] / (num_neighbors-1);
+            // normalize and then multiply by weights
+            // alignment
+            float norm = sqrt(g_avg[0]*g_avg[0] + g_avg[1]*g_avg[1]);
+            g_avg[0] = g_avg[0]/norm * align_weight;
+            g_avg[1] = g_avg[1]/norm * align_weight;
+            // cohesion
+            norm = sqrt(loc_positions[0]*loc_positions[0] + loc_positions[1]*loc_positions[1]);
+            loc_positions[0] = -loc_positions[0]/norm * coh_weight;
+            loc_positions[1] = -loc_positions[1]/norm * coh_weight;
+            // separation
+            norm = sqrt(seperation[0]*seperation[0] + seperation[1]*seperation[1]);
+            seperation[0] = -seperation[0]/norm * sep_weight;
+            seperation[1] = -seperation[1]/norm * sep_weight;
+
+            combined_theta = atan2(g_avg[1]+loc_positions[1]+seperation[1], g_avg[0]+loc_positions[0]+seperation[0]);
+
 
             local_average_position = atan2(loc_positions[1], loc_positions[0]);
 
-            gat << rover_name << " with " << num_neighbors << " neighbors with Local Average Theta = " << local_average;
+            gat << rover_name << " with " << num_neighbors << " neighbors with Combine Theta = " << combined_theta;
             pose_msg.data = gat.str();
             local_average_heading.publish(pose_msg);
         }
+
     }
 
 
